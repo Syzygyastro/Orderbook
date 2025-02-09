@@ -13,16 +13,15 @@ Order::Order(int id, double p, int qty, OrderType type)
 }
 
 void Order::displayOrder() const {
-    // Convert timestamp to a C-string safely using ctime_s.
     std::time_t timeT = std::chrono::system_clock::to_time_t(timestamp);
-    char timeStr[26]; // ctime_s requires a 26-character buffer.
+    char timeStr[26];
     errno_t err = ctime_s(timeStr, sizeof(timeStr), &timeT);
     if (err == 0) {
         std::cout << "Order ID: " << orderID
             << ", Type: " << (orderType == OrderType::BUY ? "Buy" : "Sell")
             << ", Price: $" << price
             << ", Quantity: " << quantity
-            << ", Timestamp: " << timeStr; // timeStr already ends with a newline.
+            << ", Timestamp: " << timeStr;
     }
     else {
         std::cerr << "Error converting time" << std::endl;
@@ -74,7 +73,6 @@ std::vector<Trade> OrderBook::matchOrders() {
         return a.price < b.price;
         });
 
-    // Matching loop.
     size_t i = 0, j = 0;
     while (i < buyOrders.size() && j < sellOrders.size()) {
         // A match is possible if the highest buy price is >= the lowest sell price.
@@ -82,22 +80,17 @@ std::vector<Trade> OrderBook::matchOrders() {
             int tradeQuantity = std::min(buyOrders[i].quantity, sellOrders[j].quantity);
             double tradePrice = sellOrders[j].price;  // Using sell order's price for the trade.
 
-            // Record the trade.
             trades.push_back({ buyOrders[i].orderID, sellOrders[j].orderID, tradeQuantity, tradePrice });
 
-            // Adjust quantities.
             buyOrders[i].quantity -= tradeQuantity;
             sellOrders[j].quantity -= tradeQuantity;
 
-            // Move to the next buy order if fully matched.
             if (buyOrders[i].quantity == 0)
                 i++;
-            // Move to the next sell order if fully matched.
             if (sellOrders[j].quantity == 0)
                 j++;
         }
         else {
-            // If the current highest buy order cannot match the current lowest sell order, break.
             break;
         }
     }
