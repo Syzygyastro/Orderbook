@@ -6,7 +6,7 @@
 #include <vector>
 #include <chrono>
 #include <iostream>
-#include <memory>  // For std::shared_ptr
+#include <memory>
 
 // Enum to represent Buy or Sell order type.
 enum class OrderType {
@@ -52,7 +52,6 @@ public:
     };
 };
 
-// Class to represent the OrderBook.
 class OrderBook {
 private:
     // Using shared pointers to store orders by price and timestamp, for efficient order matching and cancellation.
@@ -74,6 +73,9 @@ public:
 
     // Displays the current orders in the book.
     void displayOrders() const;
+
+    // Returns raw data for the order book (used to convert to JSON in the webserver).
+    std::pair<std::vector<std::shared_ptr<Order>>, std::vector<std::shared_ptr<Order>>> getRawOrderBookData() const;
 };
 
 #endif // ORDER_BOOK_H

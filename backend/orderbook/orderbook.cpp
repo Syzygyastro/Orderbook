@@ -3,9 +3,6 @@
 #include <iostream>
 #include <memory>  // For std::make_shared
 
-// ---------------------
-// Order Class Functions
-// ---------------------
 
 // -------------------------
 // OrderBook Class Functions
@@ -117,6 +114,28 @@ bool OrderBook::cancelOrder(int orderId) {
         }
     }
     return false;  // Order ID not found
+}
+
+// Get raw order book data (used by the server for converting to JSON)
+std::pair<std::vector<std::shared_ptr<Order>>, std::vector<std::shared_ptr<Order>>> OrderBook::getRawOrderBookData() const {
+    std::vector<std::shared_ptr<Order>> buyOrdersList;
+    std::vector<std::shared_ptr<Order>> sellOrdersList;
+
+    // Add buy orders to the buy orders list
+    for (const auto& priceOrders : buyOrders) {
+        for (const auto& orderEntry : priceOrders.second) {
+            buyOrdersList.push_back(orderEntry.second);
+        }
+    }
+
+    // Add sell orders to the sell orders list
+    for (const auto& priceOrders : sellOrders) {
+        for (const auto& orderEntry : priceOrders.second) {
+            sellOrdersList.push_back(orderEntry.second);
+        }
+    }
+
+    return { buyOrdersList, sellOrdersList };
 }
 
 void OrderBook::displayOrders() const {
