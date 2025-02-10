@@ -1,9 +1,13 @@
-#include "crow.h"  // Crow library
-#include "../orderbook/order_book.h"  // Your OrderBook header
+#include "crow.h"                 // Main Crow header
+#include "crow/middlewares/cors.h"            // CORSHandler and CORSRules
+#include "../orderbook/order_book.h"
 #include <unordered_set>
 #include <mutex>
 #include <atomic>
 #include <thread>
+
+// Instead of crow::SimpleApp, we define an App with CORSHandler
+using MyCORSApp = crow::App<crow::CORSHandler>;
 
 std::mutex connection_mutex;
 std::unordered_set<crow::websocket::connection*> active_connections;
@@ -60,11 +64,7 @@ void broadcastOrderBookUpdate()
 
     // Build a single JSON object for the update
     crow::json::wvalue updateMsg;
-
-    // "status": "update" or "type": "snapshot" is arbitrary naming for your contract
     updateMsg["status"] = "update";
-
-    // Attach the entire order book as a nested field
     updateMsg["data"] = convertOrderBookToJson(buyOrders, sellOrders);
 
     // Serialize once
@@ -80,7 +80,20 @@ void broadcastOrderBookUpdate()
 
 int main()
 {
-    crow::SimpleApp app;
+    // Create an App that uses CORSHandler as middleware
+    MyCORSApp app;
+
+    // Configure the CORS settings
+    //   - "global()" applies these rules to all routes
+    //   - "origin("*") allows any origin to access
+    //   - "methods(...)" defines which HTTP methods are permitted
+    //   - "allow_credentials(false)" typically used to permit cookies if needed
+    //   - You can also specify "headers(...)" or other rules
+    auto& cors = app.get_middleware<crow::CORSHandler>();
+    cors.global()
+        .origin("*")                                        // Allow all origins
+        .methods("GET"_method, "POST"_method, "DELETE"_method, "OPTIONS"_method)
+        .allow_credentials();
 
     // WebSocket for real-time order book
     CROW_WEBSOCKET_ROUTE(app, "/orderbook")
@@ -116,7 +129,6 @@ int main()
             })
         .onmessage([&](crow::websocket::connection& /*conn*/, const std::string& data, bool is_binary) {
         if (!is_binary) {
-            // Handle any incoming messages from the client, if needed
             CROW_LOG_INFO << "Received WebSocket message: " << data;
         }
             });
@@ -184,7 +196,6 @@ int main()
         }
 
         if (cancelled) {
-            // If successfully canceled, broadcast updated book
             broadcastOrderBookUpdate();
             return crow::response(200, "Order cancelled");
         }
