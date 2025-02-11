@@ -1,5 +1,21 @@
 import React, { useEffect, useState } from "react";
 
+// Determine base HTTP URL for the backend.
+const baseURL = process.env.REACT_APP_BACKEND_URL;
+
+// Build the WebSocket URL (use wss if https).
+function getWebSocketURL() {
+  console.log("hello: ", process.env.REACT_APP_BACKEND_URL)
+  // If the base URL starts with https, replace https with wss. If http, replace with ws.
+  if (baseURL.startsWith("https://")) {
+    return baseURL.replace("https://", "wss://") + "/orderbook";
+  } else if (baseURL.startsWith("http://")) {
+    return baseURL.replace("http://", "ws://") + "/orderbook";
+  } 
+  // Fallback if someone sets a domain without protocol
+  return `ws://${baseURL}/orderbook`;
+}
+
 function App() {
   const [bids, setBids] = useState([]);
   const [asks, setAsks] = useState([]);
@@ -14,8 +30,8 @@ function App() {
   const [cancelOrderID, setCancelOrderID] = useState("");
 
   useEffect(() => {
-    // 1. Fetch initial order book
-    fetch("/api/orderbook")
+    // 1. Fetch initial order book from REST API
+    fetch(`${baseURL}/api/orderbook`)
       .then((res) => res.json())
       .then((data) => {
         setBids(data.bids || []);
@@ -25,25 +41,23 @@ function App() {
         console.error("Error fetching orderbook:", error);
       });
 
-    // 2. Open WebSocket
-    const socketUrl = `ws://localhost:8080/orderbook`;
+    // 2. Open WebSocket using dynamic URL
+    const socketUrl = getWebSocketURL();
     const socket = new WebSocket(socketUrl);
 
     socket.onopen = () => {
-      console.log("WebSocket connected");
+      console.log("WebSocket connected to:", socketUrl);
     };
 
     socket.onmessage = (event) => {
       const msg = JSON.parse(event.data);
       // If it's a snapshot
       if (msg.type === "snapshot") {
-        // It's the entire book
         setBids(msg.bids || []);
         setAsks(msg.asks || []);
       } 
       // If it's an update
       else if (msg.status === "update") {
-        // The new data is in msg.data
         const data = msg.data;
         setBids(data.bids || []);
         setAsks(data.asks || []);
@@ -69,10 +83,10 @@ function App() {
       orderID: parseInt(orderID, 10),
       price: parseFloat(price),
       quantity: parseInt(quantity, 10),
-      orderType
+      orderType,
     };
 
-    fetch("/api/orders", {
+    fetch(`${baseURL}/api/orders`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -82,7 +96,7 @@ function App() {
       .then((res) => res.json())
       .then((data) => {
         console.log("Order added. Trades executed:", data.trades);
-        // The orderbook will update automatically via WebSocket
+        // The orderbook updates automatically via WebSocket
       })
       .catch((err) => console.error("Failed to add order:", err));
   };
@@ -92,7 +106,7 @@ function App() {
   // =======================
   const handleCancelOrder = (e) => {
     e.preventDefault();
-    fetch(`/api/order/${cancelOrderID}`, {
+    fetch(`${baseURL}/api/order/${cancelOrderID}`, {
       method: "DELETE",
     })
       .then((res) => {
@@ -101,7 +115,7 @@ function App() {
         } else {
           console.warn("Order not found or could not cancel");
         }
-        // The orderbook will update automatically via WebSocket
+        // The orderbook updates automatically via WebSocket
       })
       .catch((err) => console.error("Failed to cancel order:", err));
   };
