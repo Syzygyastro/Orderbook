@@ -4,7 +4,7 @@ import { check, sleep } from 'k6';
 export const options = {
   stages: [
     { duration: '10s', target: 50 },  // Ramp up to 50 WebSocket users over 30 seconds
-    { duration: '20', target: 200 }, // Stay at 200 users for 1 minute
+    { duration: '20', target: 500 }, // Stay at 200 users for 1 minute
     { duration: '10s', target: 0 },  // Ramp down to 0 users over 30 seconds
   ],
 };
@@ -16,8 +16,6 @@ export default function () {
   const response = ws.connect(url, params, function (socket) {
     // Event when WebSocket connection is opened
     socket.on('open', function open() {
-      console.log('WebSocket connected');
-      // No need to send anything, just listening for updates
     });
 
     // Event handler for receiving messages (updates from the server)

@@ -4,9 +4,9 @@ import { check, sleep } from 'k6';
 // Configuration for the HTTP load test
 export const options = {
     stages: [
-        { duration: '15s', target: 50 },  // Ramp up to 10 users
-        { duration: '20s', target: 100 },  // Stay at 10 users
-        { duration: '15s', target: 0 },   // Ramp down to 0 users
+        { duration: '15s', target: 10 },
+        { duration: '20s', target: 50 },
+        { duration: '15s', target: 0 },
     ],
 };
 
@@ -16,8 +16,8 @@ export default function () {
     const orderPayload = JSON.stringify({
         orderID: Math.floor(Math.random() * 1000000),
         price: Math.random() * 100,  // Directly generate a float between 0-100
-        quantity: Math.floor(Math.random() * 1000),  // Random integer for quantity
-        orderType: Math.random() > 0.5 ? 'buy' : 'sell',
+        quantity: Math.floor(Math.random() * 50),  // Random integer for quantity
+        orderType: Math.random() > 0.6 ? 'buy' : 'sell',
     });
 
     const postRes = http.post('http://localhost:8080/api/orders', orderPayload, {

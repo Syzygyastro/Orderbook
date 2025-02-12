@@ -1,157 +1,157 @@
 #include "order_book.h"
 #include <algorithm>
 #include <iostream>
-#include <memory>  // For std::make_shared
+#include <iterator>
 
-
-// -------------------------
-// OrderBook Class Functions
-// -------------------------
-std::vector<Trade> OrderBook::addOrder(std::shared_ptr<Order>& order) {
-    std::vector<Trade> trades;
-
-    // Pass the order by reference to matchOrders
-    matchOrders(order, trades);
-
-    // After matching, if there are remaining quantities, add the order to the appropriate book
-    if (order->orderType == OrderType::BUY && order->quantity > 0) {
-        buyOrders[order->price].emplace(order->timestamp, order);
-    }
-    else if (order->orderType == OrderType::SELL && order->quantity > 0) {
-        sellOrders[order->price].emplace(order->timestamp, order);
-    }
-
-    // Store the order by its ID for cancellation purposes
-    ordersById[order->orderID] = order;
-
-    return trades;
-}
-
-void OrderBook::matchOrders(std::shared_ptr<Order>& order, std::vector<Trade>& trades) {
-    if (order->orderType == OrderType::BUY) {
-        // An incoming BUY order will match with resting SELL orders.
-        while (order->quantity > 0 && !sellOrders.empty()) {
-            auto bestSell = sellOrders.begin()->second.begin();
-            std::shared_ptr<Order> sellOrder = bestSell->second;
-
-            // A match occurs only if the resting sell order's price is less than or equal to the buy order's price.
-            if (sellOrder->price > order->price) {
-                break;  // No more matches possible
+// Helper: Matching orders.
+// For a BUY order, we try to match with the best (lowest-price) asks.
+// For a SELL order, we match with the best (highest-price) bids.
+void OrderBook::matchOrders(OrderPointer order, std::vector<Trade>& trades) {
+    if (order->GetSide() == OrderType::BUY) {
+        // For a BUY order, match with asks (lowest price first).
+        while (order->quantity > 0 && !asks_.empty()) {
+            auto bestAskIt = asks_.begin(); // Lowest ask price.
+            Price askPrice = bestAskIt->first;
+            if (askPrice > order->GetPrice()) {
+                break; // Cannot match: best ask is above the buy price.
             }
-
+            // Get the FIFO order from this price level.
+            auto& askList = bestAskIt->second;
+            OrderPointer sellOrder = askList.front();
             int tradeQuantity = std::min(order->quantity, sellOrder->quantity);
-            trades.push_back({ order->orderID, sellOrder->orderID, tradeQuantity, sellOrder->price });
-
-            // Update remaining quantities
+            trades.push_back({ order->GetOrderId(), sellOrder->GetOrderId(), tradeQuantity, askPrice });
             order->quantity -= tradeQuantity;
             sellOrder->quantity -= tradeQuantity;
 
-            // Remove the sell order if it's fully matched
+            // If the sell order is fully executed, remove it.
             if (sellOrder->quantity == 0) {
-                sellOrders.begin()->second.erase(bestSell);
-                if (sellOrders.begin()->second.empty()) {
-                    sellOrders.erase(sellOrders.begin());
+                // Look up its stored location.
+                auto entryIt = orders_.find(sellOrder->GetOrderId());
+                if (entryIt != orders_.end()) {
+                    askList.erase(entryIt->second.location_);
+                    orders_.erase(entryIt);
+                }
+                if (askList.empty()) {
+                    asks_.erase(bestAskIt);
                 }
             }
         }
     }
-    else {  // Incoming SELL order
-        while (order->quantity > 0 && !buyOrders.empty()) {
-            auto bestBuy = buyOrders.begin()->second.begin();
-            std::shared_ptr<Order> buyOrder = bestBuy->second;
-
-            // A match occurs if the resting buy order's price is at least as high as the sell order's price.
-            if (buyOrder->price < order->price) {
-                break;  // No more matches possible
+    else {
+        // For a SELL order, match with bids (highest price first).
+        while (order->quantity > 0 && !bids_.empty()) {
+            auto bestBidIt = bids_.begin(); // Highest bid price.
+            Price bidPrice = bestBidIt->first;
+            if (bidPrice < order->GetPrice()) {
+                break; // Cannot match: best bid is below the sell price.
             }
-
+            auto& bidList = bestBidIt->second;
+            OrderPointer buyOrder = bidList.front();
             int tradeQuantity = std::min(order->quantity, buyOrder->quantity);
-            trades.push_back({ buyOrder->orderID, order->orderID, tradeQuantity, order->price });
-
-            // Update remaining quantities
+            trades.push_back({ buyOrder->GetOrderId(), order->GetOrderId(), tradeQuantity, bidPrice });
             order->quantity -= tradeQuantity;
             buyOrder->quantity -= tradeQuantity;
 
-            // Remove the buy order if it's fully matched
             if (buyOrder->quantity == 0) {
-                buyOrders.begin()->second.erase(bestBuy);
-                if (buyOrders.begin()->second.empty()) {
-                    buyOrders.erase(buyOrders.begin());
+                auto entryIt = orders_.find(buyOrder->GetOrderId());
+                if (entryIt != orders_.end()) {
+                    bidList.erase(entryIt->second.location_);
+                    orders_.erase(entryIt);
+                }
+                if (bidList.empty()) {
+                    bids_.erase(bestBidIt);
                 }
             }
         }
     }
 }
 
-bool OrderBook::cancelOrder(int orderId) {
-    auto it = ordersById.find(orderId);
-    if (it != ordersById.end()) {
-        std::shared_ptr<Order> order = it->second;
+// Add a new order to the order book.
+std::vector<Trade> OrderBook::addOrder(OrderPointer order) {
+    std::vector<Trade> trades;
+    // Check if the order ID already exists.
+    if (orders_.find(order->GetOrderId()) != orders_.end()) {
+        return trades;  // Returning empty trades because we rejected the order.
+    }
+    // First, try to match the order.
+    matchOrders(order, trades);
 
-        if (order->orderType == OrderType::BUY) {
-            auto& priceOrders = buyOrders[order->price];
-            auto orderIt = priceOrders.find(order->timestamp);
-            if (orderIt != priceOrders.end()) {
-                priceOrders.erase(orderIt);
-                if (priceOrders.empty()) {
-                    buyOrders.erase(order->price);
-                }
-                ordersById.erase(orderId);
-                return true;
-            }
+    // If the order still has remaining quantity, add it to the appropriate side.
+    if (order->quantity > 0) {
+        if (order->GetSide() == OrderType::BUY) {
+            auto& orderList = bids_[order->GetPrice()];
+            orderList.push_back(order);
+            // Save iterator to the newly added order.
+            auto iter = std::prev(orderList.end());
+            orders_.insert({ order->GetOrderId(), OrderEntry{ order, iter } });
         }
-        else { // SELL order
-            auto& priceOrders = sellOrders[order->price];
-            auto orderIt = priceOrders.find(order->timestamp);
-            if (orderIt != priceOrders.end()) {
-                priceOrders.erase(orderIt);
-                if (priceOrders.empty()) {
-                    sellOrders.erase(order->price);
-                }
-                ordersById.erase(orderId);
-                return true;
-            }
+        else {
+            auto& orderList = asks_[order->GetPrice()];
+            orderList.push_back(order);
+            auto iter = std::prev(orderList.end());
+            orders_.insert({ order->GetOrderId(), OrderEntry{ order, iter } });
         }
     }
-    return false;  // Order ID not found
+    return trades;
 }
 
-// Get raw order book data (used by the server for converting to JSON)
-std::pair<std::vector<std::shared_ptr<Order>>, std::vector<std::shared_ptr<Order>>> OrderBook::getRawOrderBookData() const {
-    std::vector<std::shared_ptr<Order>> buyOrdersList;
-    std::vector<std::shared_ptr<Order>> sellOrdersList;
-
-    // Add buy orders to the buy orders list
-    for (const auto& priceOrders : buyOrders) {
-        for (const auto& orderEntry : priceOrders.second) {
-            buyOrdersList.push_back(orderEntry.second);
+// Cancel an order using the stored iterator.
+bool OrderBook::cancelOrder(OrderId orderId) {
+    auto it = orders_.find(orderId);
+    if (it != orders_.end()) {
+        OrderPointer order = it->second.order_;
+        if (order->GetSide() == OrderType::BUY) {
+            auto& orderList = bids_[order->GetPrice()];
+            orderList.erase(it->second.location_);
+            if (orderList.empty()) {
+                bids_.erase(order->GetPrice());
+            }
         }
-    }
-
-    // Add sell orders to the sell orders list
-    for (const auto& priceOrders : sellOrders) {
-        for (const auto& orderEntry : priceOrders.second) {
-            sellOrdersList.push_back(orderEntry.second);
+        else {
+            auto& orderList = asks_[order->GetPrice()];
+            orderList.erase(it->second.location_);
+            if (orderList.empty()) {
+                asks_.erase(order->GetPrice());
+            }
         }
+        orders_.erase(it);
+        return true;
     }
-
-    return { buyOrdersList, sellOrdersList };
+    return false;
 }
 
+// Display the order book.
 void OrderBook::displayOrders() const {
-    std::cout << "Buy Orders:\n";
-    for (const auto& priceOrders : buyOrders) {
-        for (const auto& orderEntry : priceOrders.second) {
-            const std::shared_ptr<Order>& order = orderEntry.second;
-            std::cout << "  ID: " << order->orderID << ", Price: $" << order->price << ", Quantity: " << order->quantity << "\n";
+    std::cout << "Bids:\n";
+    for (const auto& priceOrders : bids_) {
+        for (const auto& order : priceOrders.second) {
+            std::cout << "  ID: " << order->orderID
+                << ", Price: " << order->price
+                << ", Qty: " << order->quantity << "\n";
         }
     }
+    std::cout << "Asks:\n";
+    for (const auto& priceOrders : asks_) {
+        for (const auto& order : priceOrders.second) {
+            std::cout << "  ID: " << order->orderID
+                << ", Price: " << order->price
+                << ", Qty: " << order->quantity << "\n";
+        }
+    }
+}
 
-    std::cout << "Sell Orders:\n";
-    for (const auto& priceOrders : sellOrders) {
-        for (const auto& orderEntry : priceOrders.second) {
-            const std::shared_ptr<Order>& order = orderEntry.second;
-            std::cout << "  ID: " << order->orderID << ", Price: $" << order->price << ", Quantity: " << order->quantity << "\n";
+// Get raw order book data.
+std::pair<std::vector<OrderPointer>, std::vector<OrderPointer>> OrderBook::getRawOrderBookData() const {
+    std::vector<OrderPointer> bidOrders, askOrders;
+    for (const auto& priceOrders : bids_) {
+        for (const auto& order : priceOrders.second) {
+            bidOrders.push_back(order);
         }
     }
+    for (const auto& priceOrders : asks_) {
+        for (const auto& order : priceOrders.second) {
+            askOrders.push_back(order);
+        }
+    }
+    return { bidOrders, askOrders };
 }
